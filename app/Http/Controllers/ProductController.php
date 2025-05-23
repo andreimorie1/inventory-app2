@@ -36,7 +36,10 @@ class ProductController extends Controller
 
     # detail view
     public function show($id) {
-        $product = Product::findOrFail($id);
+        $product = Product::find($id);
+        if (!$product) {
+            return response()->json(['error' => 'Product not found'], 404);
+        }
         return response()->json($product);
     }
     
@@ -47,12 +50,48 @@ class ProductController extends Controller
             'description' => 'nullable|string',
             'price' => 'required|numeric|min:0',
             'stock' => 'required|integer|min:0',
-            'status' => 'required|in:active,inactive',
         ]);
+
+        // Set status based on stock
+        $validated['status'] = ($validated['stock'] > 0) ? 'active' : 'inactive';
 
         $product = Product::create($validated);
 
         return response()->json($product, 201);
+    }
+
+    # Reduce stock for a product (called by order service when order is approved)
+    public function reduceStock(Request $request, $id) {
+        $validated = $request->validate([
+            'quantity' => 'required|integer|min:1',
+        ]);
+
+        $product = Product::findOrFail($id);
+
+        if ($product->stock < $validated['quantity']) {
+            return response()->json(['error' => 'Insufficient stock'], 400);
+        }
+
+        $product->stock -= $validated['quantity'];
+        $product->status = ($product->stock > 0) ? 'active' : 'inactive';
+        $product->save();
+
+        return response()->json($product);
+    }
+
+    # Add stock for a product (e.g., restock)
+    public function addStock(Request $request, $id) {
+        $validated = $request->validate([
+            'quantity' => 'required|integer|min:1',
+        ]);
+
+        $product = Product::findOrFail($id);
+
+        $product->stock += $validated['quantity'];
+        $product->status = ($product->stock > 0) ? 'active' : 'inactive';
+        $product->save();
+
+        return response()->json($product);
     }
 
     # update
@@ -64,9 +103,13 @@ class ProductController extends Controller
             'description' => 'nullable|string',
             'price' => 'sometimes|required|numeric|min:0',
             'stock' => 'sometimes|required|integer|min:0',
-            'status' => 'sometimes|required|in:active,inactive',
         ]);
 
+        # If stock is being updated, set status accordingly
+        if (array_key_exists('stock', $validated)) {
+            $validated['status'] = ($validated['stock'] > 0) ? 'active' : 'inactive';
+        }
+        
         $product->update($validated);
 
         return response()->json($product);
